@@ -158,7 +158,7 @@ retailpulse/
 ### 1. Clone the repo
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/retailpulse.git
+git clone https://github.com/addetsi/RetailPulse.git
 cd retailpulse
 ```
 
@@ -236,7 +236,4 @@ This project is designed to run under **$20/month** on Azure:
 
 ---
 
-## Author
 
-Built as a portfolio project to demonstrate Azure data engineering and BI skills.  
-Connect on [LinkedIn](https://linkedin.com/in/YOUR_PROFILE)
