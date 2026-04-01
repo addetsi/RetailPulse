@@ -1,18 +1,15 @@
-# RetailPulse 🛒📊
-> Cloud-native Business Intelligence platform for e-commerce analytics, built on Microsoft Azure.
-
-![Azure](https://img.shields.io/badge/Azure-Databricks%20%7C%20SQL%20%7C%20ADF%20%7C%20Blob-0078D4?logo=microsoftazure)
-![Power BI](https://img.shields.io/badge/Power%20BI-Dashboards-F2C811?logo=powerbi)
-![Python](https://img.shields.io/badge/Python-PySpark-3776AB?logo=python)
-![Status](https://img.shields.io/badge/Status-In%20Progress-yellow)
+# RetailPulse
+Cloud-native Business Intelligence platform for e-commerce analytics, built on Microsoft Azure.
 
 ---
 
 ## Overview
 
-RetailPulse is an end-to-end Azure analytics platform that ingests raw e-commerce transaction data, transforms it through a medallion architecture (Bronze → Silver → Gold), loads it into a star schema data warehouse, and surfaces business insights through interactive Power BI dashboards.
+RetailPulse is an end-to-end Azure analytics platform that ingests raw e-commerce transaction data, transforms it through a medallion architecture (Bronze, Silver, Gold), loads it into a star schema data warehouse, and surfaces business insights through interactive Power BI dashboards.
 
-**Dataset:** [UCI Online Retail II](https://www.kaggle.com/datasets/mashlyn/online-retail-ii-uci) — ~1 million real UK e-commerce transactions (2009–2011)
+**Dataset:** UCI Online Retail II — 1,067,371 real UK e-commerce transactions (2009–2011)  
+**Clean records after processing:** 1,007,913 rows  
+**Total revenue analysed:** 5.15 million GBP  
 
 ---
 
@@ -20,39 +17,31 @@ RetailPulse is an end-to-end Azure analytics platform that ingests raw e-commerc
 
 ```
 UCI Online Retail II (CSV)
-         │
-         ▼
-┌─────────────────────┐
-│  Azure Blob Storage  │  ← Raw data landing zone
-│    (raw-data/)       │
-└─────────────────────┘
-         │
-         ▼
-┌─────────────────────┐
-│ Azure Data Factory   │  ← Pipeline orchestration & scheduling
-└─────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────┐
-│           Azure Databricks               │
-│                                          │
-│  Bronze  →  Silver  →  Gold             │
-│  (raw)     (clean)    (aggregated)      │
-└─────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────┐
-│         Azure SQL Database               │
-│                                          │
-│  fact_transactions   dim_customers       │
-│  dim_products        dim_date            │
-│  agg_daily_sales     agg_customer_metrics│
-└─────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────┐
-│      Power BI        │  ← 5 interactive dashboards
-└─────────────────────┘
+         |
+         v
+Azure Blob Storage          <- Raw data landing zone
+(raw-data container)
+         |
+         v
+Azure Data Factory          <- Pipeline orchestration
+(pl_retailpulse_etl)
+         |
+         v
+Azure Databricks
+  Bronze  ->  Silver  ->  Gold
+  (raw)      (clean)    (aggregated)
+         |
+         v
+Azure SQL Database          <- Star schema data warehouse
+  fact_transactions
+  dim_customers
+  dim_products
+  dim_date
+  agg_daily_sales
+  agg_customer_metrics
+         |
+         v
+Power BI                    <- 3 interactive dashboards
 ```
 
 ---
@@ -66,31 +55,48 @@ UCI Online Retail II (CSV)
 | Data Processing | Azure Databricks (PySpark) |
 | Data Warehouse | Azure SQL Database |
 | Orchestration | Azure Data Factory |
-| Visualisation | Power BI Desktop + Service |
+| Secrets Management | Azure Key Vault |
+| Visualisation | Power BI Desktop |
 | Language | Python, SQL |
 | Version Control | Git + GitHub |
 
 ---
 
-## Project Structure
+## Data Pipeline
 
-```
-retailpulse/
-├── notebooks/
-│   ├── 01_bronze_data_exploration.py   # Raw data profiling & quality assessment
-│   ├── 02_silver_data_cleaning.py      # Cleaning, validation, deduplication
-│   ├── 03_gold_dimensions.py           # dim_customers, dim_products, dim_date
-│   ├── 04_gold_fact_table.py           # fact_transactions with FK resolution
-│   └── 05_gold_aggregations.py         # Daily sales & customer metrics
-├── sql/
-│   └── schema.sql                      # Star schema DDL + indexes
-├── adf/
-│   └── pipeline_definition.json        # Data Factory pipeline export
-├── docs/
-│   └── architecture.png                # Architecture diagram
-├── .gitignore
-└── README.md
-```
+### Bronze Layer — Raw Ingestion
+- Reads raw CSV from Azure Blob Storage into Spark DataFrame
+- Performs full data quality assessment
+- Identifies nulls, duplicates, cancelled orders and invalid prices
+
+**Data Quality Report (Raw):**
+
+| Issue | Count | Percentage |
+|---|---|---|
+| Total raw rows | 1,067,371 | 100% |
+| Null Customer IDs | 243,007 | 22.8% |
+| Cancelled orders | 19,494 | 1.8% |
+| Negative quantities | 22,950 | 2.1% |
+| Zero/negative prices | 6,207 | 0.6% |
+| Duplicate rows | 34,335 | 3.2% |
+
+### Silver Layer — Cleaned Data
+- Drops 34,335 duplicate rows
+- Isolates cancelled orders into a separate table
+- Assigns GUEST to null Customer IDs
+- Removes invalid prices and quantities
+- Parses dates and calculates total_amount = Quantity * Price
+- Writes clean data to Blob Storage as Parquet
+
+**Output: 1,007,913 clean rows — all validation checks passing**
+
+### Gold Layer — Business Metrics
+- dim_customers — 5,905 unique customers with country and guest flag
+- dim_products — 4,917 unique products (deduplicated, uppercased stock codes)
+- dim_date — 604 dates with year, quarter, month, week and day attributes
+- fact_transactions — 1,010,851 transaction lines with natural keys
+- agg_daily_sales — 2,893 daily revenue aggregations by country
+- agg_customer_metrics — 5,905 customer RFM scores and lifetime value metrics
 
 ---
 
@@ -99,50 +105,99 @@ retailpulse/
 ### Star Schema
 
 ```
-                    ┌──────────────┐
-                    │  dim_date    │
-                    └──────┬───────┘
-                           │
-┌──────────────┐    ┌──────┴────────────┐    ┌──────────────────┐
-│ dim_customers │────│ fact_transactions  │────│  dim_products    │
-└──────────────┘    └───────────────────┘    └──────────────────┘
+dim_date ──────── fact_transactions ──── dim_products
+                        |
+                  dim_customers ──── agg_customer_metrics
+
+dim_date ──── agg_daily_sales
 ```
 
-| Table | Description |
-|---|---|
-| `fact_transactions` | One row per transaction line item |
-| `dim_customers` | Unique customers with country |
-| `dim_products` | Unique products with descriptions |
-| `dim_date` | Date dimension with year/month/quarter/weekday |
-| `agg_daily_sales` | Pre-aggregated daily revenue by country |
-| `agg_customer_metrics` | RFM scores and lifetime value per customer |
+| Table | Rows | Description |
+|---|---|---|
+| fact_transactions | 1,010,851 | One row per transaction line item |
+| dim_customers | 5,905 | Unique customers with country |
+| dim_products | 4,917 | Unique products with descriptions |
+| dim_date | 604 | Date dimension with full calendar attributes |
+| agg_daily_sales | 2,893 | Pre-aggregated daily revenue by country |
+| agg_customer_metrics | 5,905 | RFM scores and lifetime value per customer |
+
+---
+
+## RFM Customer Segmentation
+
+| Segment | Customers | Description |
+|---|---|---|
+| Lost | 1,644 | Low recency, low frequency |
+| Champions | 1,408 | High recency, high frequency, high spend |
+| Loyal Customers | 1,196 | Consistent buyers |
+| Potential Loyalists | 843 | Promising new behaviour |
+| Recent Customers | 504 | Bought recently, low frequency |
+| At Risk | 284 | Previously active, going quiet |
 
 ---
 
 ## Dashboards
 
-| # | Dashboard | Key Visuals |
-|---|---|---|
-| 1 | Sales Overview | Revenue trend, revenue by country (map), top 10 products |
-| 2 | Customer Analytics | CLV distribution, RFM segmentation, new vs returning |
-| 3 | Product Performance | Best sellers by qty & revenue, declining products |
-| 4 | Operational Metrics | Daily order volume, basket size, peak day/hour analysis |
-| 5 | Executive Summary | MoM/YoY growth KPIs, top 5 countries, revenue forecast |
+### Sales Overview
+![Sales Overview](screenshots/sales-overview.jpeg)
+
+Key visuals: Total Revenue, Total Orders, Avg Order Value, Total Customers, Revenue Trend by Month, Revenue by Country map, Top 10 Products by Revenue, Country and Year slicers.
+
+### Customer Analytics
+![Customer Analytics](screenshots/customer-analytics.jpeg)
+
+Key visuals: RFM Segment donut chart, Top 15 Countries by Customers, Customer Lifetime Value distribution, Top 10 Customers by Lifetime Value table.
+
+### Executive Summary
+![Executive Summary](screenshots/executive-summary.jpeg)
+
+Key visuals: KPI cards with MoM Growth, Revenue Trend with Forecast, Monthly Revenue Heatmap, Month over Month Growth chart, Top 5 Countries by Revenue, Top 5 Customers table.
+
+### Azure Data Factory Pipeline
+![ADF Pipeline](screenshots/adf-pipeline.jpeg)
+
+End-to-end pipeline with 4 activities running in sequence: Bronze exploration, Silver cleaning, Gold dimensions and Gold aggregations — all succeeded.
 
 ---
 
 ## Business Questions Answered
 
-1. What is total revenue and how has it trended over time?
-2. Which countries generate the most revenue?
-3. Who are the top 10 customers by total spending?
-4. What are the best-selling products by quantity and revenue?
-5. What is the average order value and how does it vary by country?
-6. What is the customer retention rate (repeat purchase %)?
-7. What days/times see the highest order volumes?
-8. Which products have declining sales trends?
-9. What is customer lifetime value distribution?
-10. What is month-over-month revenue growth?
+1. What is total revenue and how has it trended over time? — Sales Overview, Executive Summary
+2. Which countries generate the most revenue? — Sales Overview map, Executive Summary
+3. Who are the top 10 customers by total spending? — Customer Analytics, Executive Summary
+4. What are the best-selling products by quantity and revenue? — Sales Overview
+5. What is the average order value and how does it vary? — Sales Overview KPI card
+6. What is the customer retention rate? — Customer Analytics RFM segments
+7. What days and times see the highest order volumes? — Executive Summary heatmap
+8. Which products have declining sales trends? — Sales Overview
+9. What is customer lifetime value distribution? — Customer Analytics
+10. What is month-over-month revenue growth? — Executive Summary MoM card
+
+---
+
+## Project Structure
+
+```
+retailpulse/
+├── notebooks/
+│   ├── 01_bronze_data_exploration.py
+│   ├── 02_silver_data_cleaning.py
+│   ├── 03_gold_dimensions.py
+│   ├── 04_gold_fact_table.py
+│   └── 05_gold_aggregations.py
+├── sql/
+│   └── schema.sql
+├── adf/
+│   ├── ARMTemplateForFactory.json
+│   └── ARMTemplateParametersForFactory.json
+├── screenshots/
+│   ├── sales-overview.jpeg
+│   ├── customer-analytics.jpeg
+│   ├── executive-summary.jpeg
+│   └── adf-pipeline.jpeg
+├── .gitignore
+└── README.md
+```
 
 ---
 
@@ -150,61 +205,67 @@ retailpulse/
 
 ### Prerequisites
 
-- Azure subscription (free tier sufficient)
+- Azure subscription
 - Power BI Desktop (free)
 - Python 3.8+
 - Databricks CLI
 
-### 1. Clone the repo
-
-```bash
-git clone https://github.com/addetsi/RetailPulse.git
-cd retailpulse
-```
 
 ### 2. Provision Azure Resources
 
-In the Azure Portal, inside a Resource Group (`retailpulse-rg`, region: West Europe):
+Inside a Resource Group (retailpulse-rg, region: West Europe):
 
-- Azure Blob Storage — Standard, LRS
-- Azure Databricks — Standard tier
-- Azure SQL Database — Basic tier (5 DTU)
-- Azure Data Factory
+- Azure Blob Storage - Standard, LRS
+- Azure Databricks - Standard tier, single-node cluster
+- Azure SQL Database - Basic tier (5 DTU)
+- Azure Data Factory - V2
+- Azure Key Vault - for secrets management
 
 ### 3. Upload Dataset
 
-Download the [UCI Online Retail II dataset](https://www.kaggle.com/datasets/mashlyn/online-retail-ii-uci) and upload to your Blob Storage container `raw-data/`.
+Download the [UCI Online Retail II dataset](https://www.kaggle.com/datasets/mashlyn/online-retail-ii-uci) and upload to Blob Storage container raw-data/.
 
 ### 4. Configure Secrets
 
-Store credentials in Databricks Secret Scope — never hardcode keys:
+Store all credentials in Azure Key Vault and link to Databricks Secret Scope.
 
-```bash
-databricks secrets create-scope --scope retailpulse-scope
-databricks secrets put --scope retailpulse-scope --key storage-account-key
-databricks secrets put --scope retailpulse-scope --key sql-connection-string
-```
+Required secrets:
 
-### 5. Run Notebooks in Order
+| Key | Description |
+|---|---|
+| storage-account-name | Azure Blob Storage account name |
+| storage-account-key | Azure Blob Storage access key |
+| sql-server | Azure SQL Server hostname |
+| sql-database | Azure SQL Database name |
+| sql-username | SQL admin username |
+| sql-password | SQL admin password |
 
-Execute notebooks `01` through `05` in sequence via Databricks or trigger the Data Factory pipeline.
+### 5. Create SQL Schema
 
-### 6. Connect Power BI
+Execute sql/schema.sql in Azure SQL Query Editor to create all 6 tables.
 
-Open Power BI Desktop → Get Data → Azure SQL Database → connect using your server and database credentials → load the dashboards.
+### 6. Run the Pipeline
+
+Either run notebooks manually in order (01 through 05) or trigger the Azure Data Factory pipeline pl_retailpulse_etl which runs all notebooks end to end.
+
+### 7. Connect Power BI
+
+Open Power BI Desktop -> Get Data -> Azure SQL Database -> connect using your server credentials -> load all 6 tables -> define relationships as per the data model above.
 
 ---
 
 ## Cost Management
 
-This project is designed to run under **$20/month** on Azure:
+This project is designed to run under $20/month on Azure:
 
-- SQL Database: Basic tier (~$5/month)
-- Databricks: Single-node cluster, auto-terminates after 30 min idle
-- Blob Storage: < $1/month for ~50MB dataset
-- Data Factory: Pay-per-run (minimal cost for dev usage)
+| Resource | Approx Cost | Notes |
+|---|---|---|
+| Azure SQL Database Basic | ~$5/month | Flat rate |
+| Databricks cluster | ~$2-3/day | Terminate when not in use |
+| Blob Storage | <$1/month | Negligible for 50MB |
+| Data Factory | Pay per run | Minimal for dev usage |
 
-> ⚠️ Always terminate your Databricks cluster when not in use.
+Always terminate the Databricks cluster immediately after each session.
 
 ---
 
@@ -213,27 +274,9 @@ This project is designed to run under **$20/month** on Azure:
 | Field | Detail |
 |---|---|
 | Source | UCI Machine Learning Repository via Kaggle |
-| Records | ~1,067,371 transactions |
+| Records | 1,067,371 transactions |
 | Period | December 2009 – December 2011 |
 | Columns | Invoice, StockCode, Description, Quantity, InvoiceDate, Price, Customer ID, Country |
-| Known Issues | ~25% missing Customer IDs, cancelled invoices (prefix 'C'), negative quantities (returns) |
+| Known Issues | 22.8% missing Customer IDs, cancelled invoices prefix C, negative quantities for returns |
 
 ---
-
-## Status
-
-- [x] Azure environment setup
-- [x] Dataset uploaded to Blob Storage
-- [x] Databricks workspace + secure secret scope
-- [x] GitHub integration via Databricks Repos
-- [ ] Bronze layer exploration
-- [ ] Silver layer cleaning
-- [ ] Gold layer transformations
-- [ ] Azure SQL star schema
-- [ ] Data Factory pipeline
-- [ ] Power BI dashboards
-- [ ] Final documentation + architecture diagram
-
----
-
-
